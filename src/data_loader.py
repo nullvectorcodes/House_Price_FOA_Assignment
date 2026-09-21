@@ -17,9 +17,20 @@ EXPECTED_COLUMNS: List[str] = [
     "stories",
     "parking",
     "age_years",
+    "latitude",
+    "longitude",
     "distance_to_city_km",
     "distance_to_school_km",
     "distance_to_hospital_km",
+    "schools_within_2km",
+    "nearest_school_km",
+    "hospitals_within_2km",
+    "nearest_hospital_km",
+    "metro_within_2km",
+    "nearest_metro_km",
+    "parks_within_2km",
+    "shopping_within_2km",
+    "supermarkets_within_2km",
     "crime_rate",
     "property_tax",
     "income_index",
@@ -83,17 +94,6 @@ def generate_synthetic_data(
     parking = rng.choice([0, 1, 2, 3], size=n_samples, p=[0.20, 0.50, 0.23, 0.07])
     age_years = np.clip(rng.exponential(scale=9.0, size=n_samples), 0, 45)
 
-    # Distances
-    distance_to_city_km = np.clip(rng.gamma(shape=2.5, scale=4.0, size=n_samples), 1.0, 38.0)
-    distance_to_school_km = np.clip(rng.uniform(0.5, 12.0, size=n_samples), 0.5, 15.0)
-    distance_to_hospital_km = np.clip(rng.uniform(0.5, 12.0, size=n_samples), 0.5, 15.0)
-
-    # Crime rate (0 to 1 scale, skewed lower)
-    crime_rate = np.clip(rng.beta(a=1.8, b=6.0, size=n_samples), 0.02, 0.95)
-
-    # Income index (0.3 to 1.0)
-    income_index = np.clip(rng.beta(a=4.0, b=2.5, size=n_samples), 0.25, 0.98)
-
     # Categorical features
     location = rng.choice(
         LOCATIONS,
@@ -105,6 +105,70 @@ def generate_synthetic_data(
         size=n_samples,
         p=[0.30, 0.45, 0.25],
     )
+
+    # Distances and Spatial Coordinates
+    city_coords = {
+        "Hyderabad": (17.3850, 78.4867),
+        "Bangalore": (12.9716, 77.5946),
+        "Mumbai": (19.0760, 72.8777),
+        "Delhi": (28.6139, 77.2090),
+        "Pune": (18.5204, 73.8567),
+        "Chennai": (13.0827, 80.2707),
+    }
+
+    # Generate latitude and longitude distributed around city centers
+    lats = []
+    lons = []
+    dist_centers = []
+    for loc in location:
+        c_lat, c_lon = city_coords[loc]
+        angle = rng.uniform(0, 2 * np.pi)
+        r_km = float(np.clip(rng.gamma(shape=2.2, scale=4.2), 0.8, 34.0))
+        d_lat = (r_km / 111.0) * np.sin(angle)
+        d_lon = (r_km / (111.0 * np.cos(np.radians(c_lat)))) * np.cos(angle)
+        lats.append(round(c_lat + d_lat, 5))
+        lons.append(round(c_lon + d_lon, 5))
+        dist_centers.append(round(r_km, 2))
+
+    latitude = np.array(lats)
+    longitude = np.array(lons)
+    distance_to_city_km = np.array(dist_centers)
+
+    # POI densities correlated with urban proximity
+    urban_density = np.clip(1.0 - (distance_to_city_km / 35.0), 0.25, 1.0)
+
+    # Schools within 2km and distance to nearest
+    schools_within_2km = np.round(rng.normal(12 * urban_density, 2.5)).astype(int)
+    schools_within_2km = np.clip(schools_within_2km, 1, 28)
+    nearest_school_km = np.round(np.clip(0.30 / urban_density + rng.normal(0, 0.15, n_samples), 0.2, 5.0), 2)
+    distance_to_school_km = nearest_school_km
+
+    # Hospitals within 2km and distance to nearest
+    hospitals_within_2km = np.round(rng.normal(5 * urban_density, 1.8)).astype(int)
+    hospitals_within_2km = np.clip(hospitals_within_2km, 0, 15)
+    nearest_hospital_km = np.round(np.clip(0.60 / urban_density + rng.normal(0, 0.25, n_samples), 0.3, 7.0), 2)
+    distance_to_hospital_km = nearest_hospital_km
+
+    # Metro within 2km and distance to nearest
+    metro_within_2km = np.round(rng.normal(3 * urban_density, 1.4)).astype(int)
+    metro_within_2km = np.clip(metro_within_2km, 0, 6)
+    nearest_metro_km = np.round(np.clip(0.90 / urban_density + rng.normal(0, 0.35, n_samples), 0.4, 9.0), 2)
+
+    # Parks, Shopping, Supermarket
+    parks_within_2km = np.clip(np.round(rng.normal(4 * urban_density, 1.5)).astype(int), 0, 10)
+    nearest_park_km = np.round(np.clip(0.50 / urban_density + rng.normal(0, 0.2, n_samples), 0.2, 6.0), 2)
+
+    shopping_within_2km = np.clip(np.round(rng.normal(3 * urban_density, 1.3)).astype(int), 0, 8)
+    nearest_shopping_km = np.round(np.clip(0.80 / urban_density + rng.normal(0, 0.3, n_samples), 0.3, 8.0), 2)
+
+    supermarkets_within_2km = np.clip(np.round(rng.normal(7 * urban_density, 2.0)).astype(int), 1, 18)
+    nearest_supermarket_km = np.round(np.clip(0.35 / urban_density + rng.normal(0, 0.15, n_samples), 0.15, 4.0), 2)
+
+    # Crime rate (0 to 1 scale, skewed lower)
+    crime_rate = np.clip(rng.beta(a=1.8, b=6.0, size=n_samples), 0.02, 0.95)
+
+    # Income index (0.3 to 1.0)
+    income_index = np.clip(rng.beta(a=4.0, b=2.5, size=n_samples), 0.25, 0.98)
 
     # Amenities correlated with area and income index
     garden_prob = np.clip(0.15 + 0.25 * (area_sqft / 3000) + 0.2 * income_index, 0.1, 0.85)
@@ -133,41 +197,36 @@ def generate_synthetic_data(
     garden_add = np.where(has_garden == "Yes", 450000.0, 0.0)
     pool_add = np.where(has_pool == "Yes", 950000.0, 0.0)
 
+    # POI Premiums
+    poi_premiums = (
+        (metro_within_2km * 150000.0)
+        + (schools_within_2km * 25000.0)
+        + (hospitals_within_2km * 35000.0)
+        + (parks_within_2km * 30000.0)
+        + (shopping_within_2km * 40000.0)
+    )
+
     # Realistic price synthesis equation with non-linear factors and economic realism
-    # Base structural value = area * city rate
     base_structure = area_sqft * city_multiplier
-
-    # Room and level contributions
     room_val = (bedrooms * 220000.0) + (bathrooms * 160000.0) + (stories * 280000.0) + (parking * 180000.0)
-
-    # Income multiplier effect (higher local income boosts property values by up to 25%)
     income_factor = 0.85 + (0.35 * income_index)
-
-    # Depreciation due to age (up to ~25% max discount for old properties)
     age_depreciation = np.maximum(0.72, 1.0 - (0.009 * age_years))
-
-    # Distance discounts (proximity to city center is highly valued)
     distance_discount = np.maximum(0.70, 1.0 - (0.012 * distance_to_city_km) - (0.004 * distance_to_school_km))
-
-    # Crime rate penalty (high crime reduces value by up to 20%)
     crime_discount = 1.0 - (0.22 * crime_rate)
 
-    # Combine economic value
     price = (
         (base_structure * income_factor * age_depreciation * distance_discount * crime_discount)
         + room_val
         + furnishing_add
         + garden_add
         + pool_add
+        + poi_premiums
     )
 
-    # Property tax approximately proportional to price (~0.4% - 0.7% with noise)
     property_tax = np.clip(price * rng.uniform(0.004, 0.007, size=n_samples) + rng.normal(0, 1500, size=n_samples), 4500, 120000)
-
-    # Realistic Gaussian noise (~5% standard deviation)
     noise = rng.normal(loc=0.0, scale=0.05 * price, size=n_samples)
     price = np.round(price + noise)
-    price = np.clip(price, 1500000.0, 50000000.0)  # Bound between 15 Lakhs and 5 Crores
+    price = np.clip(price, 1500000.0, 50000000.0)
 
     df = pd.DataFrame(
         {
@@ -177,9 +236,20 @@ def generate_synthetic_data(
             "stories": stories,
             "parking": parking,
             "age_years": np.round(age_years, 1),
-            "distance_to_city_km": np.round(distance_to_city_km, 2),
-            "distance_to_school_km": np.round(distance_to_school_km, 2),
-            "distance_to_hospital_km": np.round(distance_to_hospital_km, 2),
+            "latitude": latitude,
+            "longitude": longitude,
+            "distance_to_city_km": distance_to_city_km,
+            "distance_to_school_km": distance_to_school_km,
+            "distance_to_hospital_km": distance_to_hospital_km,
+            "schools_within_2km": schools_within_2km,
+            "nearest_school_km": nearest_school_km,
+            "hospitals_within_2km": hospitals_within_2km,
+            "nearest_hospital_km": nearest_hospital_km,
+            "metro_within_2km": metro_within_2km,
+            "nearest_metro_km": nearest_metro_km,
+            "parks_within_2km": parks_within_2km,
+            "shopping_within_2km": shopping_within_2km,
+            "supermarkets_within_2km": supermarkets_within_2km,
             "crime_rate": np.round(crime_rate, 4),
             "property_tax": np.round(property_tax, 0),
             "income_index": np.round(income_index, 4),

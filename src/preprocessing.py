@@ -27,9 +27,20 @@ NUMERICAL_COLS = [
     "stories",
     "parking",
     "age_years",
+    "latitude",
+    "longitude",
     "distance_to_city_km",
     "distance_to_school_km",
     "distance_to_hospital_km",
+    "schools_within_2km",
+    "nearest_school_km",
+    "hospitals_within_2km",
+    "nearest_hospital_km",
+    "metro_within_2km",
+    "nearest_metro_km",
+    "parks_within_2km",
+    "shopping_within_2km",
+    "supermarkets_within_2km",
     "crime_rate",
     "property_tax",
     "income_index",
@@ -83,12 +94,15 @@ class DataPreprocessor:
 
         # Numerical imputation
         for col in NUMERICAL_COLS:
-            if col in df_clean.columns:
-                if fit:
-                    median_val = float(df_clean[col].median(skipna=True))
-                    self.num_medians[col] = median_val
-                fallback = self.num_medians.get(col, 0.0)
-                df_clean[col] = df_clean[col].fillna(fallback)
+            if col not in df_clean.columns:
+                df_clean[col] = np.nan
+            if fit:
+                median_val = float(df_clean[col].median(skipna=True))
+                if np.isnan(median_val):
+                    median_val = 0.0
+                self.num_medians[col] = median_val
+            fallback = self.num_medians.get(col, 0.0)
+            df_clean[col] = df_clean[col].fillna(fallback)
 
         # Categorical imputation
         for col in CATEGORICAL_COLS + BINARY_COLS:

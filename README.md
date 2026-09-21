@@ -28,63 +28,58 @@ Traditional ordinary least squares (OLS) solvers compute an analytical normal eq
 
 ## 🏗️ End-to-End System Architecture
 
+## 🏗️ End-to-End System Architecture
+
 ```text
-                  +-----------------------------------+
-                  |   Raw Dataset (12,000+ Records)   |
-                  +-----------------+-----------------+
-                                    |
-                                    v
-                  +-----------------------------------+
-                  |  Data Cleaning & IQR Capping      |
-                  |  (Median/Mode Imputation, Winsor) |
-                  +-----------------+-----------------+
-                                    |
-                                    v
-                  +-----------------------------------+
-                  |  Feature Engineering (No Leakage) |
-                  |  (total_rooms, amenity_score, etc)|
-                  +-----------------+-----------------+
-                                    |
-                                    v
-                  +-----------------------------------+
-                  |  Categorical One-Hot Encoding     |
-                  +-----------------+-----------------+
-                                    |
-                                    v
-                  +-----------------------------------+
-                  |  StandardScaler Normalization     |
-                  |  (Fitted strictly on 70% Train)   |
-                  +-----------------+-----------------+
-                                    |
-                                    v
-                  +-----------------------------------+
-                  |  70% Train / 15% Val / 15% Test   |
-                  +-----------------+-----------------+
-                                    |
-                                    v
-                  +-----------------------------------+
-                  |  Batch Gradient Descent + Reg     |
-                  |  (L1 / L2 Penalties + Early Stop) |
-                  +-----------------+-----------------+
-                                    |
-                                    v
-                  +-----------------------------------+
-                  |  5-Fold Cross Validation & Eval   |
-                  |  (R², RMSE, MAE, MAPE, Plots)     |
-                  +-----------------+-----------------+
-                                    |
-                                    v
-                  +-----------------------------------+
-                  |  Serialized Bundle (.pkl)         |
-                  +-----------------+-----------------+
-                                    |
-            +-----------------------+-----------------------+
-            |                                               |
-            v                                               v
-+-----------------------+                       +-----------------------+
-|  Interactive CLI      |                       |  Streamlit Dashboard  |
-|  (predict.py)         |                       |  (app.py)             |
-+-----------------------+                       +-----------------------+
+                  +-------------------------------------------------------+
+                  |         USER INPUT: "Gachibowli, Hyderabad"           |
+                  +---------------------------+---------------------------+
+                                              |
+                                              v
+                  +-------------------------------------------------------+
+                  |              services/geocoding_service.py            |
+                  |  - Nominatim / Geocoding API + Caching                |
+                  |  - Coordinates: (17.4436° N, 78.3520° E)             |
+                  |  - Formatted Address, City, State, Postal Code        |
+                  +---------------------------+---------------------------+
+                                              |
+                                              v
+                  +-------------------------------------------------------+
+                  |                 services/poi_service.py               |
+                  |  - Haversine Distance: calculate_distance(lat1,lon1..)|
+                  |  - POI Categories: schools, hospitals, metro, parks,  |
+                  |    shopping, supermarkets within configurable radius  |
+                  +---------------------------+---------------------------+
+                                              |
+                                              v
+                  +-------------------------------------------------------+
+                  |            services/location_features.py              |
+                  |  - Constructs ML Feature Vector:                      |
+                  |    * latitude, longitude, distance_to_city_center     |
+                  |    * schools_within_2km, nearest_school_km            |
+                  |    * hospitals_within_2km, nearest_hospital_km        |
+                  |    * metro_within_2km, nearest_metro_km, parks, etc.  |
+                  +---------------------------+---------------------------+
+                                              |
+                                              v
+                  +-------------------------------------------------------+
+                  |              Preprocessing & Feature Scaling          |
+                  |  (Median/Mode Imputation, IQR Capping, StandardScaler)|
+                  +---------------------------+---------------------------+
+                                              |
+                                              v
+                  +-------------------------------------------------------+
+                  |      Custom Regularized Linear Regression Engine      |
+                  |       (Batch Gradient Descent + L1/L2 Penalties)      |
+                  +---------------------------+---------------------------+
+                                              |
+                        +---------------------+---------------------+
+                        |                                           |
+                        v                                           v
+            +-----------------------+                   +-----------------------+
+            |  Interactive CLI      |                   |  Streamlit Dashboard  |
+            |  (predict.py)         |                   |  (app.py)             |
+            +-----------------------+                   +-----------------------+
 ```
 
 ---
@@ -93,6 +88,32 @@ Traditional ordinary least squares (OLS) solvers compute an analytical normal eq
 
 | Column Name | Type | Unit / Values | Description |
 | :--- | :--- | :--- | :--- |
+| `area_sqft` | Float | Square feet (500–5,500) | Carpet/super built-up floor area. |
+| `bedrooms` | Integer | Count (1–6) | Number of bedrooms. |
+| `bathrooms` | Integer | Count (1–5) | Number of bathrooms. |
+| `stories` | Integer | Count (1–4) | Number of floors/stories. |
+| `parking` | Integer | Count (0–3) | Designated covered parking spaces. |
+| `age_years` | Float | Years (0–45) | Age of property since construction. |
+| `latitude` | Float | Decimal Degrees | Latitude of property. |
+| `longitude` | Float | Decimal Degrees | Longitude of property. |
+| `distance_to_city_km` | Float | Kilometers (1–38) | Haversine distance to central business district. |
+| `schools_within_2km` | Integer | Count (0–28) | Number of educational institutions within 2km. |
+| `nearest_school_km` | Float | Kilometers | Haversine distance to nearest school. |
+| `hospitals_within_2km` | Integer | Count (0–15) | Number of hospitals/clinics within 2km. |
+| `nearest_hospital_km` | Float | Kilometers | Haversine distance to nearest hospital. |
+| `metro_within_2km` | Integer | Count (0–6) | Number of metro/transit stations within 2km. |
+| `nearest_metro_km` | Float | Kilometers | Haversine distance to nearest metro station. |
+| `parks_within_2km` | Integer | Count (0–10) | Parks and recreational spaces within 2km. |
+| `shopping_within_2km`| Integer | Count (0–8) | Shopping malls within 2km. |
+| `supermarkets_within_2km`| Integer | Count (1–18) | Grocery stores / supermarkets within 2km. |
+| `crime_rate` | Float | Index (0.01–0.95) | Normalized neighborhood safety index. |
+| `property_tax` | Float | ₹ per annum | Annual municipal property tax assessment. |
+| `income_index` | Float | Index (0.2–1.0) | Local median household income relative index. |
+| `location` | Categorical | Metros | City: Mumbai, Bangalore, Delhi, Hyderabad, Pune, Chennai. |
+| `furnishing` | Categorical | Tier | Unfurnished, Semi-Furnished, Furnished. |
+| `has_garden` | Categorical | Yes / No | Availability of private landscaped garden. |
+| `has_pool` | Categorical | Yes / No | Availability of swimming pool. |
+| **`price`** | **Float** | **₹ (Target Variable)** | **Estimated market valuation.** |
 | `area_sqft` | Float | Square feet (500–5,500) | Carpet/super built-up floor area. |
 | `bedrooms` | Integer | Count (1–6) | Number of bedrooms. |
 | `bathrooms` | Integer | Count (1–5) | Number of bathrooms. |

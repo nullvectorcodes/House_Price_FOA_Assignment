@@ -67,16 +67,17 @@ def test_invalid_input_validation():
     """Verify input validation catches boundary violations."""
     # Negative area
     with pytest.raises(ValueError, match="Area.*positive"):
-        validate_property_input({"area_sqft": -500.0})
+        validate_property_input({"location": "Hyderabad", "area_sqft": -500.0})
 
     # Zero bedrooms
     with pytest.raises(ValueError, match="Bedrooms"):
-        validate_property_input({"area_sqft": 1500.0, "bedrooms": 0})
+        validate_property_input({"location": "Hyderabad", "area_sqft": 1500.0, "bedrooms": 0})
 
     # Negative distance
     with pytest.raises(ValueError, match="Distance"):
         validate_property_input(
             {
+                "location": "Hyderabad",
                 "area_sqft": 1500.0,
                 "bedrooms": 2,
                 "bathrooms": 1,

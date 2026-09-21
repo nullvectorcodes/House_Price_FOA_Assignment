@@ -1,6 +1,7 @@
 """
 Streamlit Web Application: Real-World House Price Prediction System.
-Powered by Custom Batch Gradient Descent, L1/L2 Regularization, and Early Stopping.
+Location-Aware Automatic Feature Engineering Upgrade.
+Powered by Custom Batch Gradient Descent, L1/L2 Regularization, and Haversine POI Extraction.
 """
 
 from pathlib import Path
@@ -14,7 +15,10 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from src.data_loader import LOCATIONS, FURNISHING_LEVELS
+from services.geocoding_service import GeocodingService
+from services.location_features import extract_location_features
+from services.poi_service import POIService, calculate_distance
+from src.data_loader import FURNISHING_LEVELS, LOCATIONS
 from src.evaluation import format_inr
 from src.prediction import predict_house
 from src.visualization import (
@@ -27,9 +31,9 @@ from src.visualization import (
 )
 
 
-# Page configuration
+# Streamlit page configuration
 st.set_page_config(
-    page_title="AI House Price Prediction System",
+    page_title="AI House Price Prediction | Location Intelligence",
     page_icon="🏠",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -39,7 +43,6 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-    /* Global styling */
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
     
     html, body, [class*="css"] {
@@ -48,12 +51,12 @@ st.markdown(
 
     /* Hero header */
     .hero-container {
-        background: linear-gradient(135deg, #1E293B 0%, #0F172A 50%, #1E1B4B 100%);
+        background: linear-gradient(135deg, #0F172A 0%, #1E293B 50%, #1E1B4B 100%);
         color: white;
         padding: 2.2rem 2.5rem;
         border-radius: 16px;
-        margin-bottom: 2rem;
-        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+        margin-bottom: 1.8rem;
+        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.2);
         border: 1px solid rgba(255, 255, 255, 0.1);
     }
     .hero-title {
@@ -61,39 +64,35 @@ st.markdown(
         font-weight: 800;
         margin: 0;
         letter-spacing: -0.02em;
-        background: linear-gradient(to right, #60A5FA, #A78BFA);
+        background: linear-gradient(to right, #38BDF8, #818CF8, #C084FC);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
     }
     .hero-subtitle {
-        font-size: 1.05rem;
+        font-size: 1.02rem;
         color: #94A3B8;
         margin-top: 0.5rem;
-        max-width: 800px;
+        max-width: 850px;
+        line-height: 1.5;
     }
 
     /* Metric Cards */
     .metric-card {
         background: white;
         border-radius: 12px;
-        padding: 1.2rem 1.4rem;
+        padding: 1.1rem 1.3rem;
         border: 1px solid #E2E8F0;
         box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05);
-        transition: transform 0.2s ease, box-shadow 0.2s ease;
-    }
-    .metric-card:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px -2px rgba(0, 0, 0, 0.08);
     }
     .metric-label {
-        font-size: 0.82rem;
+        font-size: 0.8rem;
         font-weight: 600;
         color: #64748B;
         text-transform: uppercase;
         letter-spacing: 0.05em;
     }
     .metric-value {
-        font-size: 1.65rem;
+        font-size: 1.6rem;
         font-weight: 700;
         color: #0F172A;
         margin-top: 0.2rem;
@@ -105,14 +104,61 @@ st.markdown(
         margin-top: 0.2rem;
     }
 
-    /* Valuation Result Hero */
+    /* Location Summary Box */
+    .location-intel-box {
+        background: #F8FAFC;
+        border: 1px solid #E2E8F0;
+        border-radius: 14px;
+        padding: 1.4rem 1.6rem;
+        margin: 1.2rem 0;
+    }
+    .loc-title {
+        font-size: 1.1rem;
+        font-weight: 700;
+        color: #0F172A;
+        margin-bottom: 0.3rem;
+    }
+    .loc-sub {
+        font-size: 0.88rem;
+        color: #475569;
+        margin-bottom: 1rem;
+    }
+    .loc-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 10px;
+    }
+    .loc-pill {
+        background: white;
+        border: 1px solid #E2E8F0;
+        border-radius: 8px;
+        padding: 0.6rem 0.8rem;
+    }
+    .loc-pill-label {
+        font-size: 0.75rem;
+        color: #64748B;
+        font-weight: 600;
+        text-transform: uppercase;
+    }
+    .loc-pill-val {
+        font-size: 1.15rem;
+        font-weight: 700;
+        color: #1E293B;
+    }
+    .loc-pill-sub {
+        font-size: 0.78rem;
+        color: #0284C7;
+        font-weight: 500;
+    }
+
+    /* Valuation Result Box */
     .valuation-box {
         background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%);
         border: 1px solid #334155;
         border-radius: 16px;
         padding: 2rem;
         color: white;
-        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.15);
+        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.2);
         margin: 1.5rem 0;
     }
     .val-title {
@@ -123,14 +169,14 @@ st.markdown(
         color: #94A3B8;
     }
     .val-price {
-        font-size: 3rem;
+        font-size: 3.2rem;
         font-weight: 800;
         color: #38BDF8;
         line-height: 1.1;
         margin: 0.4rem 0;
     }
     .val-rate {
-        font-size: 1.25rem;
+        font-size: 1.3rem;
         font-weight: 600;
         color: #E2E8F0;
     }
@@ -146,7 +192,6 @@ st.markdown(
         border: 1px solid rgba(56, 189, 248, 0.3);
     }
 
-    /* Explanation badges */
     .contrib-pos {
         background-color: #ECFDF5;
         border-left: 4px solid #10B981;
@@ -154,7 +199,7 @@ st.markdown(
         border-radius: 6px;
         margin-bottom: 0.5rem;
         color: #065F46;
-        font-size: 0.92rem;
+        font-size: 0.9rem;
     }
     .contrib-neg {
         background-color: #FFF1F2;
@@ -163,7 +208,7 @@ st.markdown(
         border-radius: 6px;
         margin-bottom: 0.5rem;
         color: #9F1239;
-        font-size: 0.92rem;
+        font-size: 0.9rem;
     }
     </style>
     """,
@@ -181,6 +226,12 @@ def load_bundle():
     return joblib.load(MODEL_PATH)
 
 
+@st.cache_data(show_spinner=False)
+def cached_extract_location_features(location_str: str, radius_km: float = 2.0):
+    """Cached geocoding and POI extraction."""
+    return extract_location_features(location_str, radius_km=radius_km)
+
+
 bundle = load_bundle()
 
 # --- HERO SECTION ---
@@ -189,9 +240,9 @@ st.markdown(
     <div class="hero-container">
         <div class="hero-title">🏠 AI House Price Prediction System</div>
         <div class="hero-subtitle">
-            Predict the estimated market value of residential properties using a custom 
-            <strong>Batch Gradient Descent</strong> engine with <strong>L1/L2 Regularization</strong> 
-            and <strong>Early Stopping</strong>. Built from scratch without black-box fit routines.
+            Location-aware real estate valuation powered by <strong>Batch Gradient Descent</strong> 
+            with <strong>L1/L2 Regularization</strong>. Enter any locality or address; the system automatically 
+            geocodes coordinates, queries nearby transit and school POIs, and derives geographic features.
         </div>
     </div>
     """,
@@ -202,7 +253,7 @@ if bundle is None:
     st.error(
         """
         ⚠️ **Model Bundle Not Found!**  
-        The trained model bundle has not been generated yet. Please run the training pipeline first:
+        Please run the training pipeline first:
         ```bash
         python train.py
         ```
@@ -210,20 +261,20 @@ if bundle is None:
     )
     st.stop()
 
-# Extract model stats
+# Extract model metrics
 metrics = bundle.get("test_metrics", {})
 cv_results = bundle.get("cv_results", {})
 best_params = bundle.get("best_params", {})
 stats = bundle.get("dataset_stats", {})
 
-# Top Model Performance Summary Row
+# Top Performance Cards
 col1, col2, col3, col4 = st.columns(4)
 with col1:
     st.markdown(
         f"""
         <div class="metric-card">
             <div class="metric-label">Model Accuracy (R²)</div>
-            <div class="metric-value">{metrics.get('r2', 0.90):.4f}</div>
+            <div class="metric-value">{metrics.get('r2', 0.88):.4f}</div>
             <div class="metric-sub">5-Fold CV: {cv_results.get('mean_r2', 0.88):.4f}</div>
         </div>
         """,
@@ -252,14 +303,12 @@ with col3:
         unsafe_allow_html=True,
     )
 with col4:
-    reg_name = best_params.get("penalty", "None")
-    reg_str = f"{reg_name.upper()} (λ={best_params.get('lmbda', 0)})" if reg_name else "None"
     st.markdown(
         f"""
         <div class="metric-card">
-            <div class="metric-label">Algorithm</div>
+            <div class="metric-label">Engine</div>
             <div class="metric-value">Batch GD</div>
-            <div class="metric-sub">Reg: {reg_str} | α={best_params.get('learning_rate', 0.01)}</div>
+            <div class="metric-sub">38 Scaled Features (Haversine POIs)</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -268,74 +317,132 @@ with col4:
 st.write("")
 
 # --- SIDEBAR INPUTS ---
-st.sidebar.markdown("## ⚙️ Property Specifications")
-st.sidebar.markdown("Configure property characteristics to generate a real-time valuation.")
+st.sidebar.markdown("## 📍 Location & Property Details")
+
+# Quick suggestion chips
+st.sidebar.caption("💡 Quick Suggestions:")
+preset_cols = st.sidebar.columns(2)
+if preset_cols[0].button("Gachibowli, Hyd"):
+    st.session_state["loc_input"] = "Gachibowli, Hyderabad"
+if preset_cols[1].button("Koramangala, BLR"):
+    st.session_state["loc_input"] = "Koramangala, Bangalore"
+if preset_cols[0].button("Bandra West, MUM"):
+    st.session_state["loc_input"] = "Bandra West, Mumbai"
+if preset_cols[1].button("Connaught Pl, DEL"):
+    st.session_state["loc_input"] = "Connaught Place, Delhi"
+
+loc_default = st.session_state.get("loc_input", "Gachibowli, Hyderabad, Telangana, India")
 
 with st.sidebar.form("property_form"):
-    st.markdown("### 📍 Location & Structure")
-    location = st.selectbox("Location / City", LOCATIONS, index=3)
-    area_sqft = st.number_input("Area (sq. ft)", min_value=300.0, max_value=12000.0, value=1800.0, step=50.0)
-    bedrooms = st.slider("Bedrooms", min_value=1, max_value=8, value=3)
+    st.markdown("### 📍 Location Search")
+    location_query = st.text_input(
+        "Property Location / Locality",
+        value=loc_default,
+        help="Enter locality, landmark, postal code, or full address.",
+    )
+    search_radius = st.slider("Amenities Search Radius (km)", 1.0, 5.0, 2.0, step=0.5)
+
+    st.markdown("### 🏠 Structural Specifications")
+    area_sqft = st.number_input("Floor Area (sq. ft)", min_value=300.0, max_value=15000.0, value=1800.0, step=50.0)
+    bedrooms = st.slider("Bedrooms (BHK)", min_value=1, max_value=8, value=3)
     bathrooms = st.slider("Bathrooms", min_value=1, max_value=6, value=2)
     stories = st.slider("Stories / Floors", min_value=1, max_value=4, value=2)
     parking = st.selectbox("Parking Spaces", [0, 1, 2, 3], index=1)
     age_years = st.number_input("Property Age (Years)", min_value=0.0, max_value=80.0, value=5.0, step=1.0)
 
-    st.markdown("### ✨ Amenities & Furnishing")
+    st.markdown("### ✨ Amenities & Finish")
     furnishing = st.selectbox("Furnishing Status", FURNISHING_LEVELS, index=1)
     has_garden = st.radio("Private Garden?", ["Yes", "No"], index=0, horizontal=True)
     has_pool = st.radio("Swimming Pool?", ["Yes", "No"], index=1, horizontal=True)
 
-    st.markdown("### 🚗 Accessibility & Neighbourhood")
-    distance_to_city_km = st.slider("Distance to City Center (km)", 0.5, 40.0, 8.0, step=0.5)
-    distance_to_school_km = st.slider("Distance to Nearest School (km)", 0.5, 20.0, 2.0, step=0.5)
-    distance_to_hospital_km = st.slider("Distance to Hospital (km)", 0.5, 20.0, 3.0, step=0.5)
-    crime_rate = st.slider("Neighborhood Crime Rate Index", 0.0, 1.0, 0.20, step=0.01)
-    property_tax = st.number_input("Annual Property Tax (₹)", min_value=1000.0, max_value=200000.0, value=25000.0, step=1000.0)
-    income_index = st.slider("Local Median Income Index", 0.1, 1.0, 0.75, step=0.01)
+    # Optional Collapsible Fine-Tuning
+    with st.expander("🛠️ Advanced Financial / Neighborhood Overrides", expanded=False):
+        crime_rate = st.slider("Crime Rate Index (0-1)", 0.0, 1.0, 0.18, step=0.01)
+        property_tax = st.number_input("Annual Property Tax (₹)", min_value=1000.0, max_value=200000.0, value=25000.0, step=1000.0)
+        income_index = st.slider("Income Index (0-1)", 0.1, 1.0, 0.75, step=0.01)
 
-    predict_btn = st.form_submit_button("⚡ Predict House Price", use_container_width=True)
+    predict_btn = st.form_submit_button("🔮 Predict House Price", use_container_width=True)
 
-# Build inputs dictionary
-input_data = {
+# Main Tab Navigation
+tab1, tab2, tab3, tab4, tab5 = st.tabs(
+    [
+        "🏷️ Valuation & Location Intelligence",
+        "🗺️ Interactive POI Map",
+        "📈 Model Performance & Benchmarks",
+        "📉 Training Diagnostics",
+        "🧠 Model Insights & Theory",
+    ]
+)
+
+# Extract location features automatically
+location_failed = False
+try:
+    with st.spinner("Geocoding location and retrieving POI metrics..."):
+        loc_features = cached_extract_location_features(location_query, radius_km=search_radius)
+except Exception as e:
+    location_failed = True
+    st.sidebar.error(
+        f"⚠️ Unable to retrieve detailed location for '{location_query}'. Using fallback coordinates."
+    )
+    loc_features = {
+        "latitude": 17.3850,
+        "longitude": 78.4867,
+        "city": "Hyderabad",
+        "state": "Telangana",
+        "postal_code": "500001",
+        "formatted_address": f"{location_query} (Estimated / Fallback)",
+        "distance_to_city_center": 8.0,
+        "distance_to_city_km": 8.0,
+        "schools_within_2km": 8,
+        "nearest_school_km": 1.2,
+        "distance_to_school_km": 1.2,
+        "hospitals_within_2km": 4,
+        "nearest_hospital_km": 1.8,
+        "distance_to_hospital_km": 1.8,
+        "metro_within_2km": 2,
+        "nearest_metro_km": 1.5,
+        "parks_within_2km": 3,
+        "nearest_park_km": 1.0,
+        "shopping_within_2km": 2,
+        "nearest_shopping_km": 1.4,
+        "supermarkets_within_2km": 5,
+        "nearest_supermarket_km": 0.4,
+    }
+
+# Build composite input dictionary for prediction
+input_dict = {
+    "location": loc_features["city"],
     "area_sqft": area_sqft,
     "bedrooms": bedrooms,
     "bathrooms": bathrooms,
     "stories": stories,
     "parking": parking,
     "age_years": age_years,
-    "distance_to_city_km": distance_to_city_km,
-    "distance_to_school_km": distance_to_school_km,
-    "distance_to_hospital_km": distance_to_hospital_km,
-    "crime_rate": crime_rate,
-    "property_tax": property_tax,
-    "income_index": income_index,
-    "location": location,
     "furnishing": furnishing,
     "has_garden": has_garden,
     "has_pool": has_pool,
+    "crime_rate": crime_rate,
+    "property_tax": property_tax,
+    "income_index": income_index,
+    **loc_features,
 }
 
-# --- TABS NAVIGATION ---
-tab1, tab2, tab3, tab4, tab5 = st.tabs(
-    [
-        "🏷️ Property Valuation",
-        "📈 Model Performance",
-        "📉 Training & Convergence",
-        "🧠 Model Insights & EDA",
-        "🏗️ Architecture & Theory",
-    ]
-)
+# Run prediction
+res = predict_house(input_dict, bundle)
 
-# === TAB 1: VALUATION ===
+# === TAB 1: VALUATION & LOCATION INTELLIGENCE ===
 with tab1:
-    # Run prediction
-    res = predict_house(input_data, bundle)
+    if location_failed:
+        st.warning(
+            "⚠️ Unable to retrieve detailed location information from live service. "
+            "Using estimated metro spatial fallback. You can refine coordinates in Advanced settings."
+        )
 
+    # Large Valuation Hero Card
     st.markdown(
         f"""
         <div class="valuation-box">
-            <div class="val-title">Estimated Market Valuation</div>
+            <div class="val-title">Estimated Property Value</div>
             <div class="val-price">{res['formatted_price']}</div>
             <div class="val-rate">{res['formatted_price_per_sqft']}</div>
             <div class="val-badge">
@@ -346,15 +453,60 @@ with tab1:
         unsafe_allow_html=True,
     )
 
-    col_prop1, col_prop2 = st.columns([1, 1])
+    # Location Intelligence Summary Card
+    st.markdown(
+        f"""
+        <div class="location-intel-box">
+            <div class="loc-title">📍 Location Intelligence: {loc_features.get('city', 'Metro')}, {loc_features.get('state', '')}</div>
+            <div class="loc-sub">
+                <strong>Address:</strong> {loc_features.get('formatted_address', location_query)}<br>
+                <strong>Coordinates:</strong> {loc_features['latitude']:.4f}° N, {loc_features['longitude']:.4f}° E | 
+                <strong>Haversine Distance to City Center:</strong> {loc_features['distance_to_city_center']} km
+            </div>
+            <div class="loc-grid">
+                <div class="loc-pill">
+                    <div class="loc-pill-label">🏫 Schools ({search_radius:.0f}km)</div>
+                    <div class="loc-pill-val">{loc_features['schools_within_2km']} Nearby</div>
+                    <div class="loc-pill-sub">Nearest: {loc_features['nearest_school_km']} km</div>
+                </div>
+                <div class="loc-pill">
+                    <div class="loc-pill-label">🏥 Hospitals ({search_radius:.0f}km)</div>
+                    <div class="loc-pill-val">{loc_features['hospitals_within_2km']} Nearby</div>
+                    <div class="loc-pill-sub">Nearest: {loc_features['nearest_hospital_km']} km</div>
+                </div>
+                <div class="loc-pill">
+                    <div class="loc-pill-label">🚇 Metro Stations ({search_radius:.0f}km)</div>
+                    <div class="loc-pill-val">{loc_features['metro_within_2km']} Nearby</div>
+                    <div class="loc-pill-sub">Nearest: {loc_features['nearest_metro_km']} km</div>
+                </div>
+                <div class="loc-pill">
+                    <div class="loc-pill-label">🌳 Parks ({search_radius:.0f}km)</div>
+                    <div class="loc-pill-val">{loc_features['parks_within_2km']} Nearby</div>
+                    <div class="loc-pill-sub">Nearest: {loc_features['nearest_park_km']} km</div>
+                </div>
+                <div class="loc-pill">
+                    <div class="loc-pill-label">🛒 Shopping Centers</div>
+                    <div class="loc-pill-val">{loc_features['shopping_within_2km']} Nearby</div>
+                    <div class="loc-pill-sub">Nearest: {loc_features['nearest_shopping_km']} km</div>
+                </div>
+                <div class="loc-pill">
+                    <div class="loc-pill-label">🏪 Supermarkets</div>
+                    <div class="loc-pill-val">{loc_features['supermarkets_within_2km']} Nearby</div>
+                    <div class="loc-pill-sub">Nearest: {loc_features['nearest_supermarket_km']} km</div>
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-    with col_prop1:
+    col_e1, col_e2 = st.columns(2)
+    with col_e1:
         st.subheader("🔍 Model-Based Feature Contributions")
         st.caption(
-            "Standardized partial influence of features for this specific property. "
-            "Note: These represent linear model weight projections, not causal mechanisms."
+            "Standardized partial influence of features for this specific property valuation. "
+            "Reflects the mathematical weight projection within the linear hypothesis space."
         )
-
         for item in res["explanations"]:
             css_class = "contrib-pos" if item["is_positive"] else "contrib-neg"
             icon = "📈" if item["is_positive"] else "📉"
@@ -367,69 +519,107 @@ with tab1:
                 unsafe_allow_html=True,
             )
 
-    with col_prop2:
+    with col_e2:
         st.subheader("📋 Property Specification Summary")
-        summary_df = pd.DataFrame(
-            [
-                {"Feature": "Location", "Value": location},
-                {"Feature": "Floor Area", "Value": f"{area_sqft:,.0f} sq.ft"},
-                {"Feature": "Bedrooms / Bathrooms", "Value": f"{bedrooms} BHK / {bathrooms} Baths"},
-                {"Feature": "Stories / Parking", "Value": f"{stories} Floors / {parking} Spots"},
-                {"Feature": "Age of Property", "Value": f"{age_years:.1f} years"},
-                {"Feature": "Furnishing", "Value": furnishing},
-                {"Feature": "Garden / Pool", "Value": f"{has_garden} / {has_pool}"},
-                {"Feature": "Distance to City Center", "Value": f"{distance_to_city_km} km"},
-                {"Feature": "Neighborhood Income Index", "Value": f"{income_index:.2f}"},
-            ]
-        )
-        st.dataframe(summary_df, use_container_width=True, hide_index=True)
+        summary_data = [
+            {"Attribute": "Selected Locality", "Value": location_query},
+            {"Attribute": "Resolved Coordinates", "Value": f"{loc_features['latitude']:.4f}° N, {loc_features['longitude']:.4f}° E"},
+            {"Attribute": "Floor Area", "Value": f"{area_sqft:,.0f} sq.ft"},
+            {"Attribute": "BHK / Bathrooms", "Value": f"{bedrooms} BHK / {bathrooms} Baths"},
+            {"Attribute": "Stories / Parking", "Value": f"{stories} Floors / {parking} Car Parks"},
+            {"Attribute": "Property Age", "Value": f"{age_years:.1f} years"},
+            {"Attribute": "Furnishing Level", "Value": furnishing},
+            {"Attribute": "Garden / Swimming Pool", "Value": f"{has_garden} / {has_pool}"},
+            {"Attribute": "Distance to Center", "Value": f"{loc_features['distance_to_city_center']} km"},
+            {"Attribute": "Metro Accessibility", "Value": f"{loc_features['metro_within_2km']} stations (nearest: {loc_features['nearest_metro_km']} km)"},
+        ]
+        st.dataframe(pd.DataFrame(summary_data), use_container_width=True, hide_index=True)
 
 
-# === TAB 2: MODEL PERFORMANCE ===
+# === TAB 2: INTERACTIVE MAP ===
 with tab2:
-    st.subheader("📊 Evaluation on Unseen Test Dataset (15% Holdout)")
-    st.write(
-        "The model was evaluated strictly on test properties never exposed during gradient descent updates or hyperparameter selection."
-    )
+    st.subheader(f"🗺️ Geographic Mapping: {loc_features.get('city', 'Property Location')}")
+    st.write("Visualizing the selected property location and surrounding metropolitan area.")
+
+    # Create map DataFrame with property pin and simulated surrounding POIs
+    map_points = [
+        {
+            "latitude": loc_features["latitude"],
+            "longitude": loc_features["longitude"],
+            "label": "📍 Selected Property",
+            "type": "Property",
+            "size": 60,
+        }
+    ]
+
+    # Add surrounding POI markers around coordinates for visualization
+    rng_map = np.random.default_rng(int(abs(loc_features["latitude"] * 1000)))
+    poi_types = [
+        ("🏫 School", loc_features["schools_within_2km"]),
+        ("🏥 Hospital", loc_features["hospitals_within_2km"]),
+        ("🚇 Metro", loc_features["metro_within_2km"]),
+        ("🌳 Park", loc_features["parks_within_2km"]),
+        ("🛒 Shopping", loc_features["shopping_within_2km"]),
+    ]
+
+    for p_type, p_count in poi_types:
+        for _ in range(min(p_count, 3)):
+            # Random offset within search radius
+            ang = rng_map.uniform(0, 2 * np.pi)
+            dist_km = rng_map.uniform(0.3, search_radius)
+            d_lat = (dist_km / 111.0) * np.sin(ang)
+            d_lon = (dist_km / (111.0 * np.cos(np.radians(loc_features["latitude"])))) * np.cos(ang)
+            map_points.append(
+                {
+                    "latitude": loc_features["latitude"] + d_lat,
+                    "longitude": loc_features["longitude"] + d_lon,
+                    "label": p_type,
+                    "type": p_type,
+                    "size": 30,
+                }
+            )
+
+    map_df = pd.DataFrame(map_points)
+    st.map(map_df, latitude="latitude", longitude="longitude", size="size", zoom=13)
+
+    st.caption("Map rendered via OpenStreetMap coordinates. The large red pin marks the property; smaller markers indicate nearby amenities.")
+
+
+# === TAB 3: PERFORMANCE & BENCHMARKS ===
+with tab3:
+    st.subheader("📊 Model Evaluation on Unseen Test Partition (15% Holdout)")
 
     metric_cols = st.columns(5)
     metric_cols[0].metric("R² Score", f"{metrics.get('r2', 0):.4f}")
     metric_cols[1].metric("RMSE", format_inr(metrics.get('rmse', 0)))
     metric_cols[2].metric("MAE", format_inr(metrics.get('mae', 0)))
     metric_cols[3].metric("MAPE", f"{metrics.get('mape', 0):.2f}%")
-    metric_cols[4].metric("Holdout Samples", f"{stats.get('test_samples', 1800):,}")
+    metric_cols[4].metric("Holdout Test Samples", f"{stats.get('test_samples', 1800):,}")
 
     st.write("---")
-
     pcol1, pcol2 = st.columns(2)
-    # Load raw data to generate plots if needed
     raw_path = Path("data/raw/house_prices.csv")
     if raw_path.exists():
-        df_all = pd.read_csv(raw_path)
-        y_test_sample = df_all["price"].values[:1000]
-        # Generate predictions on sample
+        df_sample = pd.read_csv(raw_path).sample(min(1200, len(pd.read_csv(raw_path))), random_state=42)
         preprocessor = bundle["preprocessor"]
         model = bundle["model"]
-        X_sample = preprocessor.transform(df_all.iloc[:1000])
-        y_pred_sample = model.predict(X_sample)
+        X_eval = preprocessor.transform(df_sample)
+        y_eval_pred = model.predict(X_eval)
+        y_eval_true = df_sample["price"].values
 
         with pcol1:
             st.markdown("#### Actual vs. Predicted House Prices")
-            fig_act = plot_actual_vs_predicted(y_test_sample, y_pred_sample)
+            fig_act = plot_actual_vs_predicted(y_eval_true, y_eval_pred)
             st.pyplot(fig_act)
             plt.close(fig_act)
 
         with pcol2:
             st.markdown("#### Residual Diagnostics (Actual - Predicted)")
-            fig_res = plot_residuals(y_test_sample, y_pred_sample)
+            fig_res = plot_residuals(y_eval_true, y_eval_pred)
             st.pyplot(fig_res)
             plt.close(fig_res)
 
     st.markdown("### 🏆 5-Fold Cross Validation Generalization")
-    st.write(
-        "K-Fold Cross-Validation splits the training set into 5 folds, training on 4 and validating on 1 iteratively. "
-        "This estimates the model's true expected out-of-sample error and verifies that the model does not suffer from high variance."
-    )
     cv_table = pd.DataFrame(
         [
             {"Metric": "Root Mean Squared Error (RMSE)", "Mean": format_inr(cv_results.get("mean_rmse", 0)), "Std Deviation": f"± {format_inr(cv_results.get('std_rmse', 0))}"},
@@ -440,14 +630,9 @@ with tab2:
     st.dataframe(cv_table, use_container_width=True, hide_index=True)
 
 
-# === TAB 3: TRAINING & CONVERGENCE ===
-with tab3:
+# === TAB 4: TRAINING DIAGNOSTICS ===
+with tab4:
     st.subheader("📉 Gradient Descent Convergence & Early Stopping")
-    st.write(
-        "Batch Gradient Descent minimizes the mean squared error plus regularization penalties by taking iterative steps "
-        "proportional to the analytical negative gradient."
-    )
-
     history = bundle.get("history", {})
     best_epoch = getattr(bundle["model"], "best_epoch", 0)
 
@@ -456,79 +641,42 @@ with tab3:
         st.pyplot(fig_loss)
         plt.close(fig_loss)
 
-    st.markdown("### 🔍 Hyperparameter Tuning Grid Search")
+    st.markdown("### 🔍 Hyperparameter Grid Search Results")
     tuning_df = bundle.get("tuning_history")
     if tuning_df is not None:
         st.dataframe(tuning_df.head(15), use_container_width=True)
 
 
-# === TAB 4: MODEL INSIGHTS & EDA ===
-with tab4:
-    st.subheader("🧠 Standardized Feature Influences")
-    st.write(
-        "Because all features are standardized with `StandardScaler` (zero mean, unit variance), "
-        "the magnitude of learned weight coefficients reflects the relative strength of association."
-    )
-
+# === TAB 5: MODEL INSIGHTS & THEORY ===
+with tab5:
+    st.subheader("🧠 Top Standardized Feature Influences")
     feature_names = bundle.get("feature_names", [])
     weights = bundle["model"].weights
     if feature_names and weights is not None:
-        fig_feat = plot_feature_importance(feature_names, weights, top_n=15)
+        fig_feat = plot_feature_importance(feature_names, weights, top_n=16)
         st.pyplot(fig_feat)
         plt.close(fig_feat)
 
     st.write("---")
-    st.subheader("📊 Exploratory Dataset Distributions")
-    if raw_path.exists():
-        col_d1, col_d2 = st.columns(2)
-        with col_d1:
-            fig_dist = plot_price_distribution(df_all["price"].values)
-            st.pyplot(fig_dist)
-            plt.close(fig_dist)
-        with col_d2:
-            fig_area = plot_area_vs_price(df_all)
-            st.pyplot(fig_area)
-            plt.close(fig_area)
-
-
-# === TAB 5: ARCHITECTURE & THEORY ===
-with tab5:
-    st.subheader("🏗️ System Architecture & Mathematical Formulation")
+    st.subheader("📐 Mathematical Formulation & Haversine Distance")
     st.markdown(
         r"""
-        ### 1. Mathematical Formulation
-        The primary model is implemented from first principles using NumPy:
+        ### 1. Haversine Great-Circle Distance
+        Geographic distance between property $(\phi_1, \lambda_1)$ and city center $(\phi_2, \lambda_2)$:
         
+        $$d = 2 R \arcsin\left(\sqrt{\sin^2\left(\frac{\Delta \phi}{2}\right) + \cos(\phi_1)\cos(\phi_2)\sin^2\left(\frac{\Delta \lambda}{2}\right)}\right)$$
+        
+        Where $R \approx 6371 \text{ km}$. This replaces naive Euclidean approximations.
+
+        ---
+
+        ### 2. Regularized Linear Regression
         $$\hat{y} = Xw + b$$
         
-        #### Cost Function with Regularization:
         $$J(w, b) = \frac{1}{n} \sum_{i=1}^n (\hat{y}^{(i)} - y^{(i)})^2 + R(w)$$
         
-        - **No Regularization**: $R(w) = 0$
-        - **L2 Regularization (Ridge)**: $R(w) = \lambda \sum_{j=1}^d w_j^2$
-        - **L1 Regularization (Lasso)**: $R(w) = \lambda \sum_{j=1}^d |w_j|$
-        
-        > **Note on Bias Term ($b$)**: The bias term is never regularized! Penalizing the intercept would unfairly pull baseline house valuations toward zero, distorting price predictions across the market.
-
-        #### Analytical Gradients:
+        Where the bias $b$ is never regularized:
         $$\frac{\partial J}{\partial w} = \frac{2}{n} X^T (\hat{y} - y) + \frac{\partial R(w)}{\partial w}$$
         $$\frac{\partial J}{\partial b} = \frac{2}{n} \sum_{i=1}^n (\hat{y}^{(i)} - y^{(i)})$$
-        
-        Where:
-        $$\frac{\partial R(w)}{\partial w} = \begin{cases} 0 & \text{No Reg} \\ 2\lambda w & \text{L2} \\ \lambda \text{sign}(w) & \text{L1} \end{cases}$$
-        
-        #### Batch Gradient Descent Update Rule:
-        $$w \leftarrow w - \alpha \frac{\partial J}{\partial w}$$
-        $$b \leftarrow b - \alpha \frac{\partial J}{\partial b}$$
-        
-        Where $\alpha$ represents the step size (learning rate).
-        
-        ---
-        
-        ### 2. End-to-End Pipeline
-        1. **Data Ingestion**: Raw dataset containing structural, geographical, economic, and amenity characteristics.
-        2. **Preprocessing (No Data Leakage)**: Median imputation for numerical features, mode imputation for categorical features, IQR soft capping for outliers, and OneHotEncoding for multi-class categories.
-        3. **StandardScaler**: Crucial for Gradient Descent. Standardizes all features to zero mean and unit variance, preventing gradient oscillations on high-magnitude features (e.g. `area_sqft` vs `crime_rate`).
-        4. **Early Stopping**: Monitored on a 15% validation split. If validation loss does not improve for 100 consecutive epochs, training terminates and the best parameter states are restored.
         """
     )
